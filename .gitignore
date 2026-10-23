@@ -1,8 +1,6 @@
 /.vscode
 /.embuild
 /target
-/Cargo.lock
-.cargo/
 .github/
 sdkconfig.defaults
 .history/
