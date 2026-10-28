@@ -1,5 +1,7 @@
-use esp_idf_svc::hal::gpio::{Output, OutputPin, PinDriver};
+use esp_idf_svc::hal::gpio::{Input, InputPin, Output, OutputPin, PinDriver, Pull};
 use esp_idf_svc::sys::EspError;
+use std::time::Instant;
+use esp_idf_svc::hal::delay::Ets;
 pub enum CanalRele { // Enum para identificar cada relevador
     Ac,
     Motor,
@@ -87,5 +89,47 @@ impl <'a> MOCs<'a>{
             CanalMoc::Estado => self.moc_estado.set_low()?,
         }
         Ok(())
+    }
+}
+
+pub struct Ultrasonico<'a> {
+    echo: PinDriver<'a, Input>,
+    trig: PinDriver<'a, Output>,
+}
+impl <'a> Ultrasonico<'a> {
+    pub fn new(
+        echo: impl InputPin + 'a,
+        trig: impl OutputPin + 'a,
+    ) -> Result<Self, EspError> {
+        let mut echo_driver = PinDriver::input(echo, Pull::Down)?; // Se puede variar a Up o Floating, por gusto personal lo mantengo en Down
+        let trig_driver = PinDriver::output(trig)?;
+        Ok(Self{
+            echo: echo_driver, 
+            trig: trig_driver,
+        })
+    }
+    pub fn medir_distancia(&mut self) -> Option<f32> { // Devuelve la distancia medida en centimetros
+        self.trig.set_low().unwrap();
+        Ets::delay_us(2);
+        self.trig.set_high().unwrap();
+        Ets::delay_us(10);
+        self.trig.set_low().unwrap();
+
+        let distancia_cm: Option<f32> = 'medicion: {
+            let espera = Instant::now();
+            while self.echo.is_low() {
+                if espera.elapsed().as_micros() > 5_000 {
+                    break 'medicion None;
+                }
+            }
+            let inicio = Instant::now();
+            while self.echo.is_high() {
+                if inicio.elapsed().as_micros() > 30_000 {
+                    break 'medicion None;
+                }
+            }
+            Some(inicio.elapsed().as_micros() as f32 / 58.0)
+        };
+        distancia_cm
     }
 }
