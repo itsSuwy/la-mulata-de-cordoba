@@ -9,13 +9,12 @@ fn main() {
     let mut rele = PinDriver::output(pins.gpio42).unwrap(); // Se asigna el pint 5 a una variable de caracter mutable
 
     loop {
-        rele.set_high().unwrap(); // Se enciende el rele
-        log::info!("Bobina encendida");
-        FreeRtos::delay_ms(500);
+        rele.set_high().unwrap(); 
+        log::info!("Rele encendido");
+        FreeRtos::delay_ms(500); 
 
-        rele.set_low().unwrap(); // Se apaga el rele
-        log::info!("Bobina apagada");
-        FreeRtos::delay_ms(500); // Delay de 500 ms
-        //panic!("Panic controlado para ver el funcionamiento de esta funcion"); 
+        rele.set_low().unwrap(); 
+        log::info!("Rele apagado");
+        FreeRtos::delay_ms(500);
     }
 }
