@@ -5,10 +5,28 @@ use esp_idf_svc::hal::delay::Ets;
 use esp_idf_svc::hal::ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver, Resolution, LedcChannel, LedcTimer, SpeedMode};
 use esp_idf_svc::hal::units::FromValueType;
 use esp_idf_svc::hal::delay::FreeRtos;
+use pwm_pca9685::{Address, Channel, Pca9685};
+use esp_idf_svc::hal::i2c::{I2c, I2cConfig, I2cDriver, I2cError};
 
+
+const PRESCALER: u8 = 5; // Prescaler 5 = 1000 Hz
+const PASOS: u32 = 4096; // El PCA cuenta de 0 a 4095 en cada ciclo
+const BAUDIOS_I2C: u32 = 100; // kHz
 const PERIODO_US: u32 = 20_000; // 50 Hz = un pulso cada 20 ms
 const MIN_US: u32 = 600;        // ancho de pulso para 0°
 const MAX_US: u32 = 2_400;      // ancho de pulso para 180°
+
+/// Los 16 canales del PCA9685
+pub const CANALES: [Channel; 16] = [
+    Channel::C0, Channel::C1, Channel::C2, Channel::C3,
+    Channel::C4, Channel::C5, Channel::C6, Channel::C7,
+    Channel::C8, Channel::C9, Channel::C10, Channel::C11,
+    Channel::C12, Channel::C13, Channel::C14, Channel::C15,
+];
+ 
+/// Error del PCA. Si el compilador reclama este tipo, cambia I2cError por EspError
+pub type ErrorPca = pwm_pca9685::Error<I2cError>;
+
 
 pub enum CanalRele { // Enum para identificar cada relevador
     Ac,
@@ -115,7 +133,7 @@ impl <'a> Ultrasonico<'a> {
         echo: impl InputPin + 'a,
         trig: impl OutputPin + 'a,
     ) -> Result<Self, EspError> {
-        let mut echo_driver = PinDriver::input(echo, Pull::Down)?; // Se puede variar a Up o Floating, por gusto personal lo mantengo en Down
+        let echo_driver = PinDriver::input(echo, Pull::Down)?; // Se puede variar a Up o Floating, por gusto personal lo mantengo en Down
         let trig_driver = PinDriver::output(trig)?;
         Ok(Self{
             echo: echo_driver, 
@@ -226,6 +244,48 @@ impl<'a, S: SpeedMode> Servomotor<'a, S> {
                 self.fijar_angulo(canal, a)?;
                 FreeRtos::delay_ms(pausa_ms);
             }
+        }
+        Ok(())
+    }
+}
+
+pub struct ControladorPca<'a> {
+    pwm: Pca9685<I2cDriver<'a>>,
+}
+ 
+impl<'a> ControladorPca<'a> {
+    pub fn new(
+        i2c: impl I2c + 'a,
+        sda: impl InputPin + OutputPin + 'a, // I2C es bidireccional, por eso ambos bounds
+        scl: impl InputPin + OutputPin + 'a,
+    ) -> Result<Self, ErrorPca> {
+        let config = I2cConfig::new().baudrate(BAUDIOS_I2C.kHz().into());
+        let driver = I2cDriver::new(i2c, sda, scl, &config)
+            .expect("No se pudo iniciar el bus I2C");
+ 
+        let mut pwm = Pca9685::new(driver, Address::default())?; // Direccion por defecto 0x40
+        pwm.set_prescale(PRESCALER)?; // Primero el prescaler (solo se escribe con el chip dormido)
+        pwm.enable()?; // Despues se despierta
+        Ets::delay_us(1_000); // Espera a que el oscilador se estabilice
+        Ok(Self { pwm })
+    }
+ 
+    /// Asigna un porcentaje (0 a 100) de encendido a un canal
+    pub fn set_percent(&mut self, canal: Channel, pct: u8) -> Result<(), ErrorPca> {
+        match pct {
+            0 => self.pwm.set_channel_full_off(canal)?,       // apagado total
+            100.. => self.pwm.set_channel_full_on(canal, 0)?, // encendido total
+            p => self
+                .pwm
+                .set_channel_on_off(canal, 0, (p as u32 * PASOS / 100) as u16)?, // parcial
+        }
+        Ok(())
+    }
+ 
+    /// Apaga los 16 canales
+    pub fn apagar_todos(&mut self) -> Result<(), ErrorPca> {
+        for canal in CANALES {
+            self.set_percent(canal, 0)?;
         }
         Ok(())
     }
