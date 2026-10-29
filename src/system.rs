@@ -1,10 +1,9 @@
 use esp_idf_svc::hal::gpio::{Input, InputPin, Output, OutputPin, PinDriver, Pull};
 use esp_idf_svc::sys::EspError;
 use std::time::Instant;
-use esp_idf_svc::hal::delay::Ets;
+use esp_idf_svc::hal::delay::{Ets, FreeRtos};
 use esp_idf_svc::hal::ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver, Resolution, LedcChannel, LedcTimer, SpeedMode};
 use esp_idf_svc::hal::units::FromValueType;
-use esp_idf_svc::hal::delay::FreeRtos;
 use pwm_pca9685::{Address, Channel, Pca9685};
 use esp_idf_svc::hal::i2c::{I2c, I2cConfig, I2cDriver, I2cError};
 
@@ -47,6 +46,13 @@ pub enum CanalServo {
     Servo2,
 }
 
+pub enum HallSensor {
+    Extremo_pared,
+    Extremo_borde,
+}
+
+
+
 pub struct Relevadores<'a> { // Arreglo de relevadores, cada uno con un pin asnignable
     rele_ac: PinDriver<'a, Output>,
     rele_motor: PinDriver<'a, Output>,
@@ -84,7 +90,7 @@ impl<'a> Relevadores<'a> { // Bloque logico de control sobre relevadores
     }
     pub fn apagar(&mut self, canal: CanalRele) -> Result<(), EspError> { // Apaga el relevador especifico
         match canal {
-            CanalRele::Ac => self.rele_ac.set_low()?, // Por seguridad, cualquier fallo siempre activara este
+            CanalRele::Ac => self.rele_ac.set_low()?, // Por seguridad, cualquier fallo siempre priorizara efectuar esta accion primero
             CanalRele::Motor => self.rele_motor.set_low()?,
             CanalRele::Antorcha1 => self.rele_antorcha_1.set_low()?,
             CanalRele::Antorcha2 => self.rele_antorcha_2.set_low()?,
@@ -288,5 +294,29 @@ impl<'a> ControladorPca<'a> {
             self.set_percent(canal, 0)?;
         }
         Ok(())
+    }
+}
+
+pub struct SensoresHall <'a> {
+    hall_1: PinDriver<'a, Input>,
+    hall_2: PinDriver<'a, Input>,
+}
+impl <'a> SensoresHall<'a> {
+    pub fn new(
+        hall_1: impl InputPin + 'a,
+        hall_2: impl InputPin + 'a,
+    ) -> Result<Self, EspError> {
+        let hall_1_driver = PinDriver::input(hall_1, Pull::Floating)?;
+        let hall_2_driver = PinDriver::input(hall_2, Pull::Floating)?;
+        Ok(Self{
+            hall_1: hall_1_driver,
+            hall_2: hall_2_driver,
+        })
+    }
+    pub fn deteccion(&mut self, sensor: HallSensor) -> Result<bool, EspError> {
+        match sensor {
+            HallSensor::Extremo_pared => Ok(self.hall_1.is_low()),
+            HallSensor::Extremo_borde => Ok(self.hall_2.is_low()),
+        }
     }
 }
