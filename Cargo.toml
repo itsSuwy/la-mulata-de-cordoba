@@ -1,6 +1,6 @@
 [package]
 name = "mulata-de-cordoba"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Kaori <diego.velazquez.2006@outlook.es>"]
 edition = "2021"
 resolver = "2"
