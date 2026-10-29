@@ -2,6 +2,14 @@ use esp_idf_svc::hal::gpio::{Input, InputPin, Output, OutputPin, PinDriver, Pull
 use esp_idf_svc::sys::EspError;
 use std::time::Instant;
 use esp_idf_svc::hal::delay::Ets;
+use esp_idf_svc::hal::ledc::{config::TimerConfig, LedcDriver, LedcTimerDriver, Resolution, LedcChannel, LedcTimer, SpeedMode};
+use esp_idf_svc::hal::units::FromValueType;
+use esp_idf_svc::hal::delay::FreeRtos;
+
+const PERIODO_US: u32 = 20_000; // 50 Hz = un pulso cada 20 ms
+const MIN_US: u32 = 600;        // ancho de pulso para 0°
+const MAX_US: u32 = 2_400;      // ancho de pulso para 180°
+
 pub enum CanalRele { // Enum para identificar cada relevador
     Ac,
     Motor,
@@ -13,6 +21,12 @@ pub enum CanalRele { // Enum para identificar cada relevador
 pub enum CanalMoc { // Enum para identificar cada MOC
     Relampago,
     Estado,
+}
+
+#[derive(Clone, Copy)]
+pub enum CanalServo {
+    Servo1,
+    Servo2,
 }
 
 pub struct Relevadores<'a> { // Arreglo de relevadores, cada uno con un pin asnignable
@@ -131,5 +145,88 @@ impl <'a> Ultrasonico<'a> {
             Some(inicio.elapsed().as_micros() as f32 / 58.0)
         };
         distancia_cm
+    }
+}
+
+pub struct Servomotor<'a, S: SpeedMode> {
+    _timer: LedcTimerDriver<'a, S>,
+    servo_1: LedcDriver<'a>,
+    servo_2: LedcDriver<'a>,
+}
+
+impl<'a, S: SpeedMode> Servomotor<'a, S> {
+    pub fn new<T, C1, P1, C2, P2>(
+        timer_peripheral: T,
+        channel_1_peripheral: C1,
+        pin_1: P1,
+        channel_2_peripheral: C2,
+        pin_2: P2,
+    ) -> Result<Self, EspError>
+    where
+        T: LedcTimer<SpeedMode = S> + 'a,
+        C1: LedcChannel<SpeedMode = S> + 'a,
+        C2: LedcChannel<SpeedMode = S> + 'a,
+        P1: OutputPin + 'a,
+        P2: OutputPin + 'a,
+    {
+        let timer = LedcTimerDriver::new(
+            timer_peripheral,
+            &TimerConfig::new()
+                .frequency(50u32.Hz().into())
+                .resolution(Resolution::Bits14),
+        )?;
+
+        let servo_1 =
+            LedcDriver::new(channel_1_peripheral, &timer, pin_1)?;
+
+        let servo_2 =
+            LedcDriver::new(channel_2_peripheral, &timer, pin_2)?;
+
+        let mut servos = Self {
+            _timer: timer,
+            servo_1,
+            servo_2,
+        };
+
+        servos.fijar_angulo(CanalServo::Servo1, 10)?;
+        servos.fijar_angulo(CanalServo::Servo2, 10)?;
+
+        Ok(servos)
+    }
+
+
+    /// Fija de manera directa el ángulo (0 a 180) de un servo específico
+    pub fn fijar_angulo(&mut self, canal: CanalServo, angulo: u32) -> Result<(), EspError> {
+        let angulo_clamped = angulo.min(180); // Limitar a rango máximo de 180°
+        let pulso_us = MIN_US + angulo_clamped * (MAX_US - MIN_US) / 180;
+        let driver = match canal {
+            CanalServo::Servo1 => &mut self.servo_1,
+            CanalServo::Servo2 => &mut self.servo_2,
+        };
+        let duty = pulso_us * driver.get_max_duty() / PERIODO_US;
+        driver.set_duty(duty)?;
+        Ok(())
+    }
+
+    /// Mueve el servo grado por grado desde una posición inicial a una final con un delay por paso
+    pub fn mover_suave(
+        &mut self,
+        canal: CanalServo,
+        inicio: u32,
+        fin: u32,
+        pausa_ms: u32,
+    ) -> Result<(), EspError> {
+        if inicio < fin {
+            for a in inicio..=fin {
+                self.fijar_angulo(canal, a)?;
+                FreeRtos::delay_ms(pausa_ms);
+            }
+        } else {
+            for a in (fin..=inicio).rev() {
+                self.fijar_angulo(canal, a)?;
+                FreeRtos::delay_ms(pausa_ms);
+            }
+        }
+        Ok(())
     }
 }
