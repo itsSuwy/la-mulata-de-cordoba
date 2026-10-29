@@ -12,8 +12,8 @@ const PRESCALER: u8 = 5; // Prescaler 5 = 1000 Hz
 const PASOS: u32 = 4096; // El PCA cuenta de 0 a 4095 en cada ciclo
 const BAUDIOS_I2C: u32 = 100; // kHz
 const PERIODO_US: u32 = 20_000; // 50 Hz = un pulso cada 20 ms
-const MIN_US: u32 = 600;        // ancho de pulso para 0°
-const MAX_US: u32 = 2_400;      // ancho de pulso para 180°
+const MIN_US: u32 = 600;    // ancho de pulso para 0°
+const MAX_US: u32 = 2_400;  // ancho de pulso para 180°
 
 /// Los 16 canales del PCA9685
 pub const CANALES: [Channel; 16] = [
@@ -47,11 +47,9 @@ pub enum CanalServo {
 }
 
 pub enum HallSensor {
-    Extremo_pared,
-    Extremo_borde,
+    ExtremoPared,
+    ExtremoBorde,
 }
-
-
 
 pub struct Relevadores<'a> { // Arreglo de relevadores, cada uno con un pin asnignable
     rele_ac: PinDriver<'a, Output>,
@@ -69,12 +67,26 @@ impl<'a> Relevadores<'a> { // Bloque logico de control sobre relevadores
         antorcha_2: impl OutputPin + 'a,
         foco_verde: impl OutputPin + 'a,
     ) -> Result<Self, EspError> {
-        Ok(Self {
-            rele_ac: PinDriver::output(ac)?,
-            rele_motor: PinDriver::output(motor)?,
-            rele_antorcha_1: PinDriver::output(antorcha_1)?,
-            rele_antorcha_2: PinDriver::output(antorcha_2)?,
-            rele_foco_verde: PinDriver::output(foco_verde)?,
+        // Primero asignamos los pines a cada relevador
+        let mut rele_ac = PinDriver::output(ac)?;
+        let mut rele_motor = PinDriver::output(motor)?;
+        let mut rele_antorcha_1 = PinDriver::output(antorcha_1)?;
+        let mut rele_antorcha_2 = PinDriver::output(antorcha_2)?;
+        let mut rele_foco_verde = PinDriver::output(foco_verde)?;
+
+        // Ahora apagamos todos los pines por seguridad
+        rele_ac.set_low()?;
+        rele_motor.set_low()?;
+        rele_antorcha_1.set_low()?;
+        rele_antorcha_2.set_low()?;
+        rele_foco_verde.set_low()?;
+        
+        Ok(Self { // Retornamos la estructura con los pines ya asignados y apagados
+            rele_ac,
+            rele_motor,
+            rele_antorcha_1,
+            rele_antorcha_2,
+            rele_foco_verde,
         })
     }
 
@@ -100,18 +112,23 @@ impl<'a> Relevadores<'a> { // Bloque logico de control sobre relevadores
     }
 }
 
-pub struct MOCs <'a>{
+pub struct Mocs <'a>{
     moc_relampago: PinDriver<'a, Output>,
     moc_estado: PinDriver<'a, Output>, // Este indicara exito al establecerse la conexion del primer relevador a NA
 }
-impl <'a> MOCs<'a>{
+impl <'a> Mocs<'a>{
     pub fn new( // Misma logica que relevadores, en Main se asigna el pin especifico
         relampago: impl OutputPin + 'a,
         estado: impl OutputPin + 'a,
     ) -> Result<Self, EspError> {
+        let mut moc_relampago = PinDriver::output(relampago)?;
+        let mut moc_estado = PinDriver::output(estado)?;
+
+        moc_relampago.set_low()?;
+        moc_estado.set_low()?;
         Ok(Self{
-            moc_relampago: PinDriver::output(relampago)?,
-            moc_estado: PinDriver::output(estado)?,
+            moc_relampago,
+            moc_estado,
         })
     }
     pub fn encender(&mut self, canal: CanalMoc) -> Result<(), EspError> { // Enciende el MOC especifico
@@ -313,10 +330,10 @@ impl <'a> SensoresHall<'a> {
             hall_2: hall_2_driver,
         })
     }
-    pub fn deteccion(&mut self, sensor: HallSensor) -> Result<bool, EspError> {
+    pub fn deteccion(self, sensor: HallSensor) -> bool{
         match sensor {
-            HallSensor::Extremo_pared => Ok(self.hall_1.is_low()),
-            HallSensor::Extremo_borde => Ok(self.hall_2.is_low()),
+            HallSensor::ExtremoPared => self.hall_1.is_low(),
+            HallSensor::ExtremoBorde => self.hall_2.is_low(),
         }
     }
-}
+}   
